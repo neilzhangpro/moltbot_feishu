@@ -1,0 +1,31 @@
+{
+  "name": "@moltbot/feishu",
+  "version": "2026.1.29",
+  "type": "module",
+  "description": "Moltbot Feishu/Lark channel plugin",
+  "moltbot": {
+    "extensions": ["./index.ts"],
+    "channel": {
+      "id": "feishu",
+      "label": "Feishu/Lark",
+      "selectionLabel": "飞书 (WebSocket 长连接)",
+      "docsPath": "/channels/feishu",
+      "docsLabel": "feishu",
+      "blurb": "飞书开放平台 WebSocket 长连接模式",
+      "aliases": ["lark"],
+      "order": 80,
+      "quickstartAllowFrom": true
+    },
+    "install": {
+      "npmSpec": "@moltbot/feishu",
+      "localPath": "extensions/feishu",
+      "defaultChoice": "npm"
+    }
+  },
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.38.0"
+  },
+  "devDependencies": {
+    "moltbot": "workspace:*"
+  }
+}
