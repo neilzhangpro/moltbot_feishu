@@ -2,8 +2,21 @@ import * as lark from "@larksuiteoapi/node-sdk";
 
 import type { MoltbotConfig } from "clawdbot/plugin-sdk";
 
-import type { ResolvedFeishuAccount, FeishuTextContent } from "./types.js";
-import { replyFeishuMessage } from "./api.js";
+import type {
+  ResolvedFeishuAccount,
+  FeishuTextContent,
+  FeishuUserEnteredChatEvent,
+  FeishuUserAddedToGroupEvent,
+  FeishuFileEvent,
+  FeishuCalendarEvent,
+} from "./types.js";
+import {
+  replyFeishuMessage,
+  sendFeishuMessage,
+  sendFeishuMentionMessage,
+  listBotGroups,
+  broadcastToGroups,
+} from "./api.js";
 import { getFeishuRuntime } from "./runtime.js";
 
 /**
@@ -116,22 +129,94 @@ export async function monitorFeishuProvider(options: FeishuMonitorOptions): Prom
 
   runtime.log?.(`[feishu:${account.accountId}] starting WebSocket client`);
 
+  // 事件处理上下文
+  const eventContext = { account, config, runtime, statusSink };
+
+  // 错误处理函数
+  const handleEventError = (eventType: string, err: unknown) => {
+    runtime.error?.(
+      `[feishu:${account.accountId}] error handling ${eventType}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  };
+
   // 创建事件分发器
   // 重要：飞书长连接模式要求事件处理在 3 秒内完成，否则会触发超时重推
-  // 因此这里不等待 handleMessageEvent 完成，立即返回让 SDK 发送 ACK
+  // 因此这里不等待事件处理完成，立即返回让 SDK 发送 ACK
   const eventDispatcher = new lark.EventDispatcher({}).register({
+    // ============ 消息事件 ============
     "im.message.receive_v1": (data) => {
       runtime.log?.(`[feishu:${account.accountId}] *** RECEIVED EVENT im.message.receive_v1 ***`);
       runtime.log?.(`[feishu:${account.accountId}] event data: ${JSON.stringify(data).slice(0, 500)}`);
 
       // 异步处理消息，不等待完成（避免超过 3 秒超时）
-      handleMessageEvent(data, { account, config, runtime, statusSink }).catch((err) => {
-        runtime.error?.(
-          `[feishu:${account.accountId}] error handling message: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+      handleMessageEvent(data, eventContext).catch((err) => handleEventError("im.message.receive_v1", err));
+    },
 
-      // 立即返回，让 SDK 发送 ACK 确认
+    // ============ 用户进入与机器人会话 ============
+    "im.chat.access_event.bot_p2p_chat_entered_v1": (data) => {
+      runtime.log?.(`[feishu:${account.accountId}] *** RECEIVED EVENT bot_p2p_chat_entered_v1 ***`);
+      runtime.log?.(`[feishu:${account.accountId}] event data: ${JSON.stringify(data).slice(0, 500)}`);
+
+      handleUserEnteredChat(data, eventContext).catch((err) =>
+        handleEventError("bot_p2p_chat_entered_v1", err),
+      );
+    },
+
+    // ============ 用户进群 ============
+    "im.chat.member.user.added_v1": (data) => {
+      runtime.log?.(`[feishu:${account.accountId}] *** RECEIVED EVENT user.added_v1 ***`);
+      runtime.log?.(`[feishu:${account.accountId}] event data: ${JSON.stringify(data).slice(0, 500)}`);
+
+      handleUserAddedToGroup(data, eventContext).catch((err) =>
+        handleEventError("user.added_v1", err),
+      );
+    },
+
+    // ============ 文件事件 ============
+    "drive.file.created_in_folder_v1": (data) => {
+      runtime.log?.(`[feishu:${account.accountId}] *** RECEIVED EVENT file.created_in_folder_v1 ***`);
+      runtime.log?.(`[feishu:${account.accountId}] event data: ${JSON.stringify(data).slice(0, 500)}`);
+
+      handleFileEvent("created", data, eventContext).catch((err) =>
+        handleEventError("file.created_in_folder_v1", err),
+      );
+    },
+
+    "drive.file.deleted_v1": (data) => {
+      runtime.log?.(`[feishu:${account.accountId}] *** RECEIVED EVENT file.deleted_v1 ***`);
+      runtime.log?.(`[feishu:${account.accountId}] event data: ${JSON.stringify(data).slice(0, 500)}`);
+
+      handleFileEvent("deleted", data, eventContext).catch((err) =>
+        handleEventError("file.deleted_v1", err),
+      );
+    },
+
+    "drive.file.edit_v1": (data) => {
+      runtime.log?.(`[feishu:${account.accountId}] *** RECEIVED EVENT file.edit_v1 ***`);
+      runtime.log?.(`[feishu:${account.accountId}] event data: ${JSON.stringify(data).slice(0, 500)}`);
+
+      handleFileEvent("edited", data, eventContext).catch((err) =>
+        handleEventError("file.edit_v1", err),
+      );
+    },
+
+    // ============ 日历事件 ============
+    "calendar.calendar.changed_v4": (data) => {
+      runtime.log?.(`[feishu:${account.accountId}] *** RECEIVED EVENT calendar.changed_v4 ***`);
+      runtime.log?.(`[feishu:${account.accountId}] event data: ${JSON.stringify(data).slice(0, 500)}`);
+
+      handleCalendarEvent("calendar_changed", data, eventContext).catch((err) =>
+        handleEventError("calendar.changed_v4", err),
+      );
+    },
+
+    "calendar.calendar.event.changed_v4": (data) => {
+      runtime.log?.(`[feishu:${account.accountId}] *** RECEIVED EVENT calendar.event.changed_v4 ***`);
+      runtime.log?.(`[feishu:${account.accountId}] event data: ${JSON.stringify(data).slice(0, 500)}`);
+
+      handleCalendarEvent("event_changed", data, eventContext).catch((err) =>
+        handleEventError("calendar.event.changed_v4", err),
+      );
     },
   });
 
@@ -338,5 +423,246 @@ export function stopAllFeishuMonitors(): void {
   for (const [key, client] of activeClients.entries()) {
     client.stop();
     activeClients.delete(key);
+  }
+}
+
+// ============ 新增事件处理函数 ============
+
+/** 事件处理上下文类型 */
+type EventHandlerContext = {
+  account: ResolvedFeishuAccount;
+  config: MoltbotConfig;
+  runtime: FeishuMonitorRuntimeEnv;
+  statusSink?: (patch: { lastInboundAt?: number; lastOutboundAt?: number }) => void;
+};
+
+/**
+ * 处理用户进入与机器人会话事件
+ * 发送问候消息
+ */
+async function handleUserEnteredChat(
+  data: unknown,
+  context: EventHandlerContext,
+): Promise<void> {
+  const { account, runtime } = context;
+
+  // 事件去重
+  const eventData = data as { event_id?: string };
+  if (isEventProcessed(eventData.event_id)) {
+    runtime.log?.(`[feishu:${account.accountId}] skipping duplicate user entered event`);
+    return;
+  }
+
+  const event = data as FeishuUserEnteredChatEvent;
+  const chatId = event.chat_id;
+  const userId = event.operator_id?.open_id;
+
+  if (!chatId) {
+    runtime.log?.(`[feishu:${account.accountId}] user entered event missing chat_id`);
+    return;
+  }
+
+  runtime.log?.(`[feishu:${account.accountId}] user ${userId} entered chat ${chatId}`);
+
+  // 发送问候消息
+  const greetingMessage = "你好！我是 Moltbot 助手，有什么可以帮助你的吗？";
+  const result = await sendFeishuMessage({
+    account,
+    chatId,
+    text: greetingMessage,
+    receiveIdType: "chat_id",
+  });
+
+  if (result.success) {
+    runtime.log?.(`[feishu:${account.accountId}] greeting sent to chat ${chatId}`);
+  } else {
+    runtime.error?.(`[feishu:${account.accountId}] failed to send greeting: ${result.error}`);
+  }
+}
+
+/**
+ * 处理用户进群事件
+ * @用户并发送欢迎语
+ */
+async function handleUserAddedToGroup(
+  data: unknown,
+  context: EventHandlerContext,
+): Promise<void> {
+  const { account, runtime } = context;
+
+  // 事件去重
+  const eventData = data as { event_id?: string };
+  if (isEventProcessed(eventData.event_id)) {
+    runtime.log?.(`[feishu:${account.accountId}] skipping duplicate user added event`);
+    return;
+  }
+
+  const event = data as FeishuUserAddedToGroupEvent;
+  const chatId = event.chat_id;
+  const users = event.users ?? [];
+
+  if (!chatId) {
+    runtime.log?.(`[feishu:${account.accountId}] user added event missing chat_id`);
+    return;
+  }
+
+  if (users.length === 0) {
+    runtime.log?.(`[feishu:${account.accountId}] user added event has no users`);
+    return;
+  }
+
+  runtime.log?.(`[feishu:${account.accountId}] ${users.length} user(s) added to group ${chatId}`);
+
+  // 为每个新用户发送欢迎消息
+  for (const user of users) {
+    const userId = user.user_id?.open_id;
+    const userName = user.name ?? "同学";
+
+    if (!userId) {
+      runtime.log?.(`[feishu:${account.accountId}] user has no open_id, skipping`);
+      continue;
+    }
+
+    const welcomeMessage = "欢迎加入学习群！如有课程问题随时提问。";
+    const result = await sendFeishuMentionMessage({
+      account,
+      chatId,
+      text: welcomeMessage,
+      mentionUserId: userId,
+      mentionName: userName,
+    });
+
+    if (result.success) {
+      runtime.log?.(`[feishu:${account.accountId}] welcome message sent to ${userName} in group ${chatId}`);
+    } else {
+      runtime.error?.(`[feishu:${account.accountId}] failed to send welcome: ${result.error}`);
+    }
+  }
+}
+
+/**
+ * 处理文件事件
+ * 通知到机器人所在的所有群
+ */
+async function handleFileEvent(
+  eventType: "created" | "deleted" | "edited",
+  data: unknown,
+  context: EventHandlerContext,
+): Promise<void> {
+  const { account, runtime } = context;
+
+  // 事件去重
+  const eventData = data as { event_id?: string };
+  if (isEventProcessed(eventData.event_id)) {
+    runtime.log?.(`[feishu:${account.accountId}] skipping duplicate file ${eventType} event`);
+    return;
+  }
+
+  const event = data as FeishuFileEvent;
+  const fileToken = event.file_token ?? "未知文件";
+  const fileType = event.file_type ?? "";
+
+  runtime.log?.(`[feishu:${account.accountId}] file ${eventType}: ${fileToken} (${fileType})`);
+
+  // 构建通知消息
+  let message: string;
+  switch (eventType) {
+    case "created":
+      message = `📄 新文件已创建：${fileToken}`;
+      break;
+    case "deleted":
+      message = `🗑️ 文件已删除：${fileToken}`;
+      break;
+    case "edited":
+      message = `✏️ 文件已更新：${fileToken}`;
+      break;
+  }
+
+  // 获取机器人所在的所有群
+  const groupsResult = await listBotGroups(account);
+  if (groupsResult.error) {
+    runtime.error?.(`[feishu:${account.accountId}] failed to list groups: ${groupsResult.error}`);
+    return;
+  }
+
+  if (groupsResult.groups.length === 0) {
+    runtime.log?.(`[feishu:${account.accountId}] no groups found for file notification`);
+    return;
+  }
+
+  runtime.log?.(`[feishu:${account.accountId}] broadcasting file event to ${groupsResult.groups.length} groups`);
+
+  // 广播到所有群
+  const groupIds = groupsResult.groups.map((g) => g.chat_id);
+  const broadcastResult = await broadcastToGroups({
+    account,
+    groupIds,
+    text: message,
+  });
+
+  runtime.log?.(
+    `[feishu:${account.accountId}] file event broadcast complete: ${broadcastResult.successCount} success, ${broadcastResult.failedCount} failed`,
+  );
+}
+
+/**
+ * 处理日历事件
+ * 私聊通知相关用户
+ */
+async function handleCalendarEvent(
+  eventType: "calendar_changed" | "event_changed",
+  data: unknown,
+  context: EventHandlerContext,
+): Promise<void> {
+  const { account, runtime } = context;
+
+  // 事件去重
+  const eventData = data as { event_id?: string };
+  if (isEventProcessed(eventData.event_id)) {
+    runtime.log?.(`[feishu:${account.accountId}] skipping duplicate calendar ${eventType} event`);
+    return;
+  }
+
+  const event = data as FeishuCalendarEvent;
+  const calendarId = event.calendar_id ?? "未知日历";
+  const userIdList = event.user_id_list ?? [];
+
+  runtime.log?.(`[feishu:${account.accountId}] calendar ${eventType}: ${calendarId}, users: ${userIdList.length}`);
+
+  // 构建通知消息
+  let message: string;
+  switch (eventType) {
+    case "calendar_changed":
+      message = "📅 日历已更新，请查看最新日程安排。";
+      break;
+    case "event_changed":
+      message = "📅 日程已变更，请注意时间调整。";
+      break;
+  }
+
+  if (userIdList.length === 0) {
+    runtime.log?.(`[feishu:${account.accountId}] no users to notify for calendar event`);
+    return;
+  }
+
+  // 私聊通知每个相关用户
+  for (const user of userIdList) {
+    const userId = user.open_id;
+    if (!userId) {
+      continue;
+    }
+
+    const result = await sendFeishuMessage({
+      account,
+      chatId: userId,
+      text: message,
+      receiveIdType: "open_id",
+    });
+
+    if (result.success) {
+      runtime.log?.(`[feishu:${account.accountId}] calendar notification sent to ${userId}`);
+    } else {
+      runtime.error?.(`[feishu:${account.accountId}] failed to notify ${userId}: ${result.error}`);
+    }
   }
 }

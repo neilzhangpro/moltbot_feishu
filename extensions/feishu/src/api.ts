@@ -163,3 +163,172 @@ export async function probeFeishu(
     };
   }
 }
+
+/**
+ * 获取机器人所在的所有群列表
+ * 需要 im:chat:readonly 权限
+ */
+export async function listBotGroups(account: ResolvedFeishuAccount): Promise<{
+  groups: Array<{ chat_id: string; name?: string }>;
+  error?: string;
+}> {
+  try {
+    const client = getFeishuClient(account);
+    const groups: Array<{ chat_id: string; name?: string }> = [];
+    let pageToken: string | undefined;
+
+    // 分页获取所有群
+    do {
+      const response = (await client.im.chat.list({
+        params: {
+          page_size: 100,
+          page_token: pageToken,
+        },
+      })) as {
+        code?: number;
+        msg?: string;
+        data?: {
+          items?: Array<{ chat_id?: string; name?: string }>;
+          page_token?: string;
+          has_more?: boolean;
+        };
+      };
+
+      if (response.code !== 0) {
+        return {
+          groups: [],
+          error: response.msg ?? `Feishu API error: ${response.code}`,
+        };
+      }
+
+      const items = response.data?.items ?? [];
+      for (const item of items) {
+        if (item.chat_id) {
+          groups.push({
+            chat_id: item.chat_id,
+            name: item.name,
+          });
+        }
+      }
+
+      pageToken = response.data?.has_more ? response.data.page_token : undefined;
+    } while (pageToken);
+
+    return { groups };
+  } catch (err) {
+    return {
+      groups: [],
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * 发送带 @用户 的消息到群
+ * 使用富文本格式实现 @功能
+ */
+export async function sendFeishuMentionMessage(params: {
+  account: ResolvedFeishuAccount;
+  chatId: string;
+  text: string;
+  mentionUserId: string;
+  mentionName?: string;
+}): Promise<{ messageId?: string; success: boolean; error?: string }> {
+  const { account, chatId, text, mentionUserId, mentionName } = params;
+
+  try {
+    const client = getFeishuClient(account);
+
+    // 构建富文本消息内容，包含 @用户
+    const content = JSON.stringify({
+      zh_cn: {
+        title: "",
+        content: [
+          [
+            {
+              tag: "at",
+              user_id: mentionUserId,
+              user_name: mentionName ?? "",
+            },
+            {
+              tag: "text",
+              text: ` ${text}`,
+            },
+          ],
+        ],
+      },
+    });
+
+    const response = await client.im.message.create({
+      params: {
+        receive_id_type: "chat_id",
+      },
+      data: {
+        receive_id: chatId,
+        msg_type: "post",
+        content,
+      },
+    });
+
+    const data = response as FeishuSendMessageResponse;
+
+    if (data.code !== 0) {
+      return {
+        success: false,
+        error: data.msg ?? `Feishu API error: ${data.code}`,
+      };
+    }
+
+    return {
+      success: true,
+      messageId: data.data?.message_id,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * 批量发送消息到多个群
+ */
+export async function broadcastToGroups(params: {
+  account: ResolvedFeishuAccount;
+  groupIds: string[];
+  text: string;
+}): Promise<{ successCount: number; failedCount: number; errors: string[] }> {
+  const { account, groupIds, text } = params;
+  let successCount = 0;
+  let failedCount = 0;
+  const errors: string[] = [];
+
+  // 并发发送消息到所有群
+  const results = await Promise.allSettled(
+    groupIds.map((chatId) =>
+      sendFeishuMessage({
+        account,
+        chatId,
+        text,
+        receiveIdType: "chat_id",
+      }),
+    ),
+  );
+
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (result.status === "fulfilled" && result.value.success) {
+      successCount++;
+    } else {
+      failedCount++;
+      const errorMsg =
+        result.status === "rejected"
+          ? String(result.reason)
+          : result.value.error ?? "Unknown error";
+      errors.push(`${groupIds[i]}: ${errorMsg}`);
+    }
+  }
+
+  return { successCount, failedCount, errors };
+}

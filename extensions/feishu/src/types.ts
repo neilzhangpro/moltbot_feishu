@@ -105,3 +105,56 @@ export type FeishuSendMessageResponse = {
     };
   };
 };
+
+// ============ 事件数据类型 ============
+
+/** 用户进入与机器人会话事件 (im.chat.access_event.bot_p2p_chat_entered_v1) */
+export type FeishuUserEnteredChatEvent = {
+  chat_id?: string;
+  operator_id?: {
+    open_id?: string;
+    user_id?: string;
+    union_id?: string;
+  };
+};
+
+/** 用户进群事件 (im.chat.member.user.added_v1) */
+export type FeishuUserAddedToGroupEvent = {
+  chat_id?: string;
+  operator_id?: {
+    open_id?: string;
+    user_id?: string;
+    union_id?: string;
+  };
+  users?: Array<{
+    user_id?: {
+      open_id?: string;
+      user_id?: string;
+      union_id?: string;
+    };
+    name?: string;
+    tenant_key?: string;
+  }>;
+};
+
+/** 文件事件 (drive.file.*) */
+export type FeishuFileEvent = {
+  file_token?: string;
+  file_type?: string;
+  folder_token?: string;
+  operator_id?: {
+    open_id?: string;
+    user_id?: string;
+    union_id?: string;
+  };
+};
+
+/** 日历事件 (calendar.calendar.*) */
+export type FeishuCalendarEvent = {
+  calendar_id?: string;
+  user_id_list?: Array<{
+    open_id?: string;
+    user_id?: string;
+    union_id?: string;
+  }>;
+};
