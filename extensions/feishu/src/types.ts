@@ -158,3 +158,52 @@ export type FeishuCalendarEvent = {
     union_id?: string;
   }>;
 };
+
+// ============ 命令系统类型 ============
+
+/** 支持的命令类型 */
+export type CommandType = "announcement" | "add_member" | "remove_member" | "list_members";
+
+/** 解析后的命令 */
+export type ParsedCommand = {
+  /** 命令类型 */
+  type: CommandType;
+  /** 命令参数（去除命令前缀后的文本） */
+  args: string;
+  /** 命令中@提及的用户 open_id 列表 */
+  mentionedUserIds: string[];
+};
+
+/** 群成员信息 */
+export type GroupMember = {
+  /** 成员 open_id */
+  memberId: string;
+  /** 成员名称 */
+  name?: string;
+  /** 成员角色：群主、管理员、普通成员 */
+  role?: "owner" | "admin" | "member";
+};
+
+/** 命令执行上下文 */
+export type CommandContext = {
+  /** 群 ID */
+  chatId: string;
+  /** 发起者 open_id */
+  senderId: string;
+  /** 原始消息 ID（用于回复） */
+  messageId: string;
+  /** 消息中的@提及列表 */
+  mentions: Array<{
+    key?: string;
+    id?: { open_id?: string };
+    name?: string;
+  }>;
+};
+
+/** 命令执行结果 */
+export type CommandResult = {
+  /** 是否执行成功 */
+  success: boolean;
+  /** 返回给用户的消息 */
+  message: string;
+};

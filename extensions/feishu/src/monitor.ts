@@ -16,8 +16,10 @@ import {
   sendFeishuMentionMessage,
   listBotGroups,
   broadcastToGroups,
+  getBotInfo,
 } from "./api.js";
 import { getFeishuRuntime } from "./runtime.js";
+import { parseCommand, executeCommand } from "./commands.js";
 
 /**
  * 已处理事件 ID 缓存（用于去重）
@@ -260,6 +262,7 @@ export async function monitorFeishuProvider(options: FeishuMonitorOptions): Prom
 
 /**
  * 处理消息事件
+ * 支持@机器人检测、命令解析和 AI 对话
  */
 async function handleMessageEvent(
   data: unknown,
@@ -341,13 +344,83 @@ async function handleMessageEvent(
   const chatId = message.chat_id ?? "";
   const messageId = message.message_id ?? "";
   const chatType = message.chat_type === "group" ? "group" : "direct";
+  const mentions = message.mentions ?? [];
 
   runtime.log?.(
     `[feishu:${account.accountId}] received message from ${senderId}: ${textContent.slice(0, 50)}...`,
   );
 
+  // ============ 群消息@检测 ============
+  // 群消息需要@机器人才会响应
+  if (chatType === "group") {
+    // 获取机器人 open_id（用于检测是否@了机器人）
+    const botInfo = await getBotInfo(account);
+    if (botInfo.error) {
+      runtime.error?.(`[feishu:${account.accountId}] failed to get bot info: ${botInfo.error}`);
+      return;
+    }
+
+    const botOpenId = botInfo.openId;
+    const isMentioningBot = mentions.some((m) => m.id?.open_id === botOpenId);
+
+    if (!isMentioningBot) {
+      runtime.log?.(`[feishu:${account.accountId}] group message without mentioning bot, ignoring`);
+      return;
+    }
+
+    runtime.log?.(`[feishu:${account.accountId}] bot mentioned in group message`);
+  }
+
   // 更新入站时间
   statusSink?.({ lastInboundAt: Date.now() });
+
+  // ============ 清理文本（移除@标记） ============
+  let cleanText = textContent;
+  for (const mention of mentions) {
+    if (mention.key) {
+      cleanText = cleanText.replace(mention.key, "").trim();
+    }
+  }
+
+  // ============ 命令解析 ============
+  // 过滤掉@机器人的 mention，只保留其他用户的 mention（用于命令参数）
+  const botInfo = await getBotInfo(account);
+  const otherMentions = mentions.filter((m) => m.id?.open_id !== botInfo.openId);
+  const parsedCommand = parseCommand(cleanText, otherMentions);
+
+  if (parsedCommand) {
+    runtime.log?.(`[feishu:${account.accountId}] command detected: ${parsedCommand.type}`);
+
+    // 执行命令
+    const cmdResult = await executeCommand({
+      account,
+      command: parsedCommand,
+      context: {
+        chatId,
+        senderId,
+        messageId,
+        mentions: otherMentions,
+      },
+    });
+
+    // 回复命令执行结果
+    const replyResult = await replyFeishuMessage({
+      account,
+      messageId,
+      text: cmdResult.message,
+    });
+
+    if (replyResult.success) {
+      statusSink?.({ lastOutboundAt: Date.now() });
+      runtime.log?.(`[feishu:${account.accountId}] command reply sent: ${cmdResult.message.slice(0, 50)}...`);
+    } else {
+      runtime.error?.(`[feishu:${account.accountId}] failed to send command reply: ${replyResult.error}`);
+    }
+
+    return;
+  }
+
+  // ============ 非命令消息，走正常 AI 对话流程 ============
 
   // 构建入站上下文（使用核心系统期望的字段名）
   const inboundContext = coreRuntime.channel.reply.finalizeInboundContext({
@@ -357,7 +430,7 @@ async function handleMessageEvent(
     To: chatId,
     ChatType: chatType,
     ReplyToId: messageId,
-    Body: textContent,
+    Body: cleanText, // 使用清理后的文本
     AccountId: account.accountId,
   });
 
