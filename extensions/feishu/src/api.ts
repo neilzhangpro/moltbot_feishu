@@ -726,7 +726,8 @@ export async function getGroupAnnouncement(params: {
 
 /**
  * 更新升级版群公告（docx 类型）
- * 使用新版 block-based API
+ * 使用新版 docx/v1 block-based API
+ * 参考文档：https://open.feishu.cn/document/ukTMukTMukTM/uUDN04SN0QjL1QDN/document-docx/docx-v1/chat-announcement-block/list
  * 需要权限: im:chat（机器人需要是群主或管理员）
  */
 async function updateDocxAnnouncement(params: {
@@ -738,11 +739,11 @@ async function updateDocxAnnouncement(params: {
   const client = getFeishuClient(account);
 
   try {
-    // 升级版群公告使用 block-based API
+    // 升级版群公告使用 docx/v1 block-based API
     // 先获取当前公告的 blocks 以获取根 block_id
     const getBlocksResponse = (await client.request({
       method: "GET",
-      url: `/open-apis/im/v2/chats/${chatId}/chat_announcement/blocks?page_size=50`,
+      url: `/open-apis/docx/v1/chat_announcements/${chatId}/blocks?page_size=50`,
     })) as {
       code?: number;
       msg?: string;
@@ -755,10 +756,10 @@ async function updateDocxAnnouncement(params: {
       return { success: false, error: getBlocksResponse.msg ?? `获取公告失败: ${getBlocksResponse.code}` };
     }
 
-    // 构建段落 block 数据结构
+    // 构建段落 block 数据结构（block_type: 2 = text/paragraph）
     const paragraphBlock = {
-      block_type: 2, // 2 = paragraph
-      paragraph: {
+      block_type: 2,
+      text: {
         elements: [
           {
             text_run: {
@@ -769,45 +770,18 @@ async function updateDocxAnnouncement(params: {
       },
     };
 
-    // 如果已有 blocks，使用批量更新；否则创建新 block
     const existingBlocks = getBlocksResponse.data?.items ?? [];
+    // 查找第一个 page block (block_type: 1) 作为父级
+    const pageBlock = existingBlocks.find((b) => b.block_type === 1);
 
-    if (existingBlocks.length > 0) {
-      // 批量更新现有 blocks
-      const updateResponse = (await client.request({
-        method: "PATCH",
-        url: `/open-apis/im/v2/chats/${chatId}/chat_announcement/blocks/batch_update`,
-        data: {
-          update_blocks: [
-            {
-              block_id: existingBlocks[0].block_id,
-              update_paragraph: {
-                elements: [
-                  {
-                    text_run: {
-                      content: content,
-                    },
-                  },
-                ],
-              },
-            },
-          ],
-        },
-      })) as {
-        code?: number;
-        msg?: string;
-      };
-
-      if (updateResponse.code !== 0) {
-        return { success: false, error: updateResponse.msg ?? `更新公告失败: ${updateResponse.code}` };
-      }
-    } else {
-      // 创建新的 block
+    if (pageBlock && pageBlock.block_id) {
+      // 在 page block 下创建子 block
       const createResponse = (await client.request({
         method: "POST",
-        url: `/open-apis/im/v2/chats/${chatId}/chat_announcement/blocks`,
+        url: `/open-apis/docx/v1/chat_announcements/${chatId}/blocks/${pageBlock.block_id}/children`,
         data: {
           children: [paragraphBlock],
+          index: 0, // 插入到开头
         },
       })) as {
         code?: number;
@@ -817,6 +791,13 @@ async function updateDocxAnnouncement(params: {
       if (createResponse.code !== 0) {
         return { success: false, error: createResponse.msg ?? `创建公告失败: ${createResponse.code}` };
       }
+    } else {
+      // 没有找到 page block，尝试直接创建
+      // 根据飞书文档，可能需要先获取根 block
+      return {
+        success: false,
+        error: "无法找到群公告的根 block，请确保群公告已初始化",
+      };
     }
 
     return { success: true };
