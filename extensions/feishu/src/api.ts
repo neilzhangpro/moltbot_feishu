@@ -180,13 +180,15 @@ export async function listBotGroups(account: ResolvedFeishuAccount): Promise<{
     const groups: Array<{ chat_id: string; name?: string }> = [];
     let pageToken: string | undefined;
 
-    // 分页获取所有群
+    // 分页获取所有群（使用 request 方式调用）
     do {
-      const response = (await client.im.v1.chat.list({
-        params: {
-          page_size: 100,
-          page_token: pageToken,
-        },
+      const url = pageToken
+        ? `/open-apis/im/v1/chats?page_size=100&page_token=${pageToken}`
+        : "/open-apis/im/v1/chats?page_size=100";
+
+      const response = (await client.request({
+        method: "GET",
+        url,
       })) as {
         code?: number;
         msg?: string;
@@ -412,15 +414,19 @@ export async function getGroupMembers(params: {
   try {
     const client = getFeishuClient(account);
 
-    // 分页获取群成员
+    // 分页获取群成员（使用 request 方式调用）
     do {
-      const response = (await client.im.v1.chat.members.get({
-        path: { chat_id: chatId },
-        params: {
-          member_id_type: "open_id",
-          page_size: 100,
-          page_token: pageToken,
-        },
+      const urlParams = new URLSearchParams({
+        member_id_type: "open_id",
+        page_size: "100",
+      });
+      if (pageToken) {
+        urlParams.set("page_token", pageToken);
+      }
+
+      const response = (await client.request({
+        method: "GET",
+        url: `/open-apis/im/v1/chats/${chatId}/members?${urlParams.toString()}`,
       })) as {
         code?: number;
         msg?: string;
@@ -480,9 +486,10 @@ export async function getGroupInfo(params: {
 
   try {
     const client = getFeishuClient(account);
-    const response = (await client.im.v1.chat.get({
-      path: { chat_id: chatId },
-      params: { user_id_type: "open_id" },
+    // 使用 request 方式调用获取群信息 API
+    const response = (await client.request({
+      method: "GET",
+      url: `/open-apis/im/v1/chats/${chatId}?user_id_type=open_id`,
     })) as {
       code?: number;
       msg?: string;
@@ -530,11 +537,11 @@ export async function isUserGroupAdmin(params: {
       return { isAdmin: true, isOwner: true };
     }
 
-    // 获取群管理员列表
+    // 获取群管理员列表（使用 request 方式调用）
     const client = getFeishuClient(account);
-    const response = (await client.im.v1.chat.managers.get({
-      path: { chat_id: chatId },
-      params: { user_id_type: "open_id" },
+    const response = (await client.request({
+      method: "GET",
+      url: `/open-apis/im/v1/chats/${chatId}/managers?user_id_type=open_id`,
     })) as {
       code?: number;
       msg?: string;
@@ -574,9 +581,10 @@ export async function addMembersToGroup(params: {
 
   try {
     const client = getFeishuClient(account);
-    const response = (await client.im.v1.chat.members.create({
-      path: { chat_id: chatId },
-      params: { member_id_type: "open_id" },
+    // 使用 request 方式调用添加群成员 API
+    const response = (await client.request({
+      method: "POST",
+      url: `/open-apis/im/v1/chats/${chatId}/members?member_id_type=open_id`,
       data: { id_list: memberIds },
     })) as {
       code?: number;
@@ -622,9 +630,10 @@ export async function removeMembersFromGroup(params: {
 
   try {
     const client = getFeishuClient(account);
-    const response = (await client.im.v1.chat.members.delete({
-      path: { chat_id: chatId },
-      params: { member_id_type: "open_id" },
+    // 使用 request 方式调用移除群成员 API
+    const response = (await client.request({
+      method: "DELETE",
+      url: `/open-apis/im/v1/chats/${chatId}/members?member_id_type=open_id`,
       data: { id_list: memberIds },
     })) as {
       code?: number;
@@ -664,8 +673,10 @@ export async function updateGroupAnnouncement(params: {
 
   try {
     const client = getFeishuClient(account);
-    const response = (await client.im.v1.chat.announcement.patch({
-      path: { chat_id: chatId },
+    // 使用 request 方式调用更新群公告 API
+    const response = (await client.request({
+      method: "PATCH",
+      url: `/open-apis/im/v1/chats/${chatId}/announcement`,
       data: { content },
     })) as {
       code?: number;
