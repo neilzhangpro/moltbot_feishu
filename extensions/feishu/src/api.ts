@@ -726,7 +726,7 @@ export async function getGroupAnnouncement(params: {
 
 /**
  * 更新升级版群公告（docx 类型）
- * 使用 docx/v1/chat_announcements API
+ * 使用 docx/v1/chat_announcement_blocks API
  * 参考文档：https://open.feishu.cn/document/group/upgraded-group-announcement/chat-announcement-block/create
  * 需要权限: im:chat（机器人需要是群主或管理员）
  */
@@ -739,11 +739,12 @@ async function updateDocxAnnouncement(params: {
   const client = getFeishuClient(account);
 
   try {
-    // 升级版群公告使用 docx/v1/chat_announcements API
+    // 升级版群公告使用 docx/v1/chat_announcement_blocks API
     // 先获取当前公告的 blocks 以获取根 block_id
+    // 参考 SDK: client.docx.v1.chatAnnouncementBlock.list
     const getBlocksResponse = (await client.request({
       method: "GET",
-      url: `/open-apis/docx/v1/chat_announcements/${chatId}/blocks?page_size=50`,
+      url: `/open-apis/docx/v1/chat_announcement_blocks/${chatId}?page_size=50&revision_id=-1`,
     })) as {
       code?: number;
       msg?: string;
@@ -757,13 +758,16 @@ async function updateDocxAnnouncement(params: {
     }
 
     // 构建段落 block 数据结构（block_type: 2 = text/paragraph）
+    // 参考官方示例格式
     const paragraphBlock = {
       block_type: 2,
       text: {
+        style: {},
         elements: [
           {
             text_run: {
               content: content,
+              text_element_style: {},
             },
           },
         ],
@@ -771,33 +775,27 @@ async function updateDocxAnnouncement(params: {
     };
 
     const existingBlocks = getBlocksResponse.data?.items ?? [];
-    // 查找第一个 page block (block_type: 1) 作为父级
+    // 查找第一个 page block (block_type: 1) 作为父级，或使用 chatId 作为根 block
     const pageBlock = existingBlocks.find((b) => b.block_type === 1);
+    // 根据官方示例，block_id 可以直接使用 chat_id
+    const blockId = pageBlock?.block_id ?? chatId;
 
-    if (pageBlock && pageBlock.block_id) {
-      // 在 page block 下创建子 block
-      const createResponse = (await client.request({
-        method: "POST",
-        url: `/open-apis/docx/v1/chat_announcements/${chatId}/blocks/${pageBlock.block_id}/children`,
-        data: {
-          children: [paragraphBlock],
-          index: 0, // 插入到开头
-        },
-      })) as {
-        code?: number;
-        msg?: string;
-      };
+    // 在 block 下创建子 block
+    // 参考 SDK: client.docx.v1.chatAnnouncementBlockChildren.create
+    const createResponse = (await client.request({
+      method: "POST",
+      url: `/open-apis/docx/v1/chat_announcement_blocks/${chatId}/blocks/${blockId}/children?revision_id=-1`,
+      data: {
+        children: [paragraphBlock],
+        index: 0, // 插入到开头
+      },
+    })) as {
+      code?: number;
+      msg?: string;
+    };
 
-      if (createResponse.code !== 0) {
-        return { success: false, error: createResponse.msg ?? `创建公告失败: ${createResponse.code}` };
-      }
-    } else {
-      // 没有找到 page block，尝试直接创建
-      // 根据飞书文档，可能需要先获取根 block
-      return {
-        success: false,
-        error: "无法找到群公告的根 block，请确保群公告已初始化",
-      };
+    if (createResponse.code !== 0) {
+      return { success: false, error: createResponse.msg ?? `创建公告失败: ${createResponse.code}` };
     }
 
     return { success: true };
