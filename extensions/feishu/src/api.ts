@@ -182,7 +182,7 @@ export async function listBotGroups(account: ResolvedFeishuAccount): Promise<{
 
     // 分页获取所有群
     do {
-      const response = (await client.im.chat.list({
+      const response = (await client.im.v1.chat.list({
         params: {
           page_size: 100,
           page_token: pageToken,
@@ -414,7 +414,7 @@ export async function getGroupMembers(params: {
 
     // 分页获取群成员
     do {
-      const response = (await client.im.chat.members.get({
+      const response = (await client.im.v1.chat.members.get({
         path: { chat_id: chatId },
         params: {
           member_id_type: "open_id",
@@ -480,7 +480,7 @@ export async function getGroupInfo(params: {
 
   try {
     const client = getFeishuClient(account);
-    const response = (await client.im.chat.get({
+    const response = (await client.im.v1.chat.get({
       path: { chat_id: chatId },
       params: { user_id_type: "open_id" },
     })) as {
@@ -532,7 +532,7 @@ export async function isUserGroupAdmin(params: {
 
     // 获取群管理员列表
     const client = getFeishuClient(account);
-    const response = (await client.im.chat.managers.get({
+    const response = (await client.im.v1.chat.managers.get({
       path: { chat_id: chatId },
       params: { user_id_type: "open_id" },
     })) as {
@@ -574,7 +574,7 @@ export async function addMembersToGroup(params: {
 
   try {
     const client = getFeishuClient(account);
-    const response = (await client.im.chat.members.create({
+    const response = (await client.im.v1.chat.members.create({
       path: { chat_id: chatId },
       params: { member_id_type: "open_id" },
       data: { id_list: memberIds },
@@ -622,7 +622,7 @@ export async function removeMembersFromGroup(params: {
 
   try {
     const client = getFeishuClient(account);
-    const response = (await client.im.chat.members.delete({
+    const response = (await client.im.v1.chat.members.delete({
       path: { chat_id: chatId },
       params: { member_id_type: "open_id" },
       data: { id_list: memberIds },
@@ -664,7 +664,7 @@ export async function updateGroupAnnouncement(params: {
 
   try {
     const client = getFeishuClient(account);
-    const response = (await client.im.chat.announcement.patch({
+    const response = (await client.im.v1.chat.announcement.patch({
       path: { chat_id: chatId },
       data: { content },
     })) as {
