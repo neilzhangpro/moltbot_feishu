@@ -726,7 +726,7 @@ export async function getGroupAnnouncement(params: {
 
 /**
  * 更新升级版群公告（docx 类型）
- * 使用新版 im/v2 block-based API
+ * 使用 im/v1 chat_announcement_blocks API
  * 参考文档：https://open.feishu.cn/document/group/upgraded-group-announcement/chat-announcement-block/create
  * 需要权限: im:chat（机器人需要是群主或管理员）
  */
@@ -739,11 +739,11 @@ async function updateDocxAnnouncement(params: {
   const client = getFeishuClient(account);
 
   try {
-    // 升级版群公告使用 im/v2 block-based API
+    // 升级版群公告使用 im/v1 chat_announcement_blocks API
     // 先获取当前公告的 blocks 以获取根 block_id
     const getBlocksResponse = (await client.request({
       method: "GET",
-      url: `/open-apis/im/v2/chats/${chatId}/chat_announcement/blocks?page_size=50`,
+      url: `/open-apis/im/v1/chats/${chatId}/chat_announcement_blocks?page_size=50`,
     })) as {
       code?: number;
       msg?: string;
@@ -778,7 +778,7 @@ async function updateDocxAnnouncement(params: {
       // 在 page block 下创建子 block
       const createResponse = (await client.request({
         method: "POST",
-        url: `/open-apis/im/v2/chats/${chatId}/chat_announcement/blocks/${pageBlock.block_id}/children`,
+        url: `/open-apis/im/v1/chats/${chatId}/chat_announcement_blocks/${pageBlock.block_id}/children`,
         data: {
           children: [paragraphBlock],
           index: 0, // 插入到开头
