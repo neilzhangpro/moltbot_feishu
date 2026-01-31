@@ -657,6 +657,32 @@ export async function removeMembersFromGroup(params: {
 }
 
 /**
+ * 从 Axios 错误中提取飞书 API 错误信息
+ */
+function extractFeishuError(err: unknown): string {
+  if (err && typeof err === "object") {
+    // Axios 错误响应中可能包含飞书 API 返回的详细错误
+    const axiosErr = err as {
+      response?: {
+        data?: { code?: number; msg?: string };
+        status?: number;
+      };
+      message?: string;
+    };
+    if (axiosErr.response?.data?.msg) {
+      return `${axiosErr.response.data.msg} (code: ${axiosErr.response.data.code})`;
+    }
+    if (axiosErr.response?.status) {
+      return `HTTP ${axiosErr.response.status}: ${axiosErr.message}`;
+    }
+    if (axiosErr.message) {
+      return axiosErr.message;
+    }
+  }
+  return String(err);
+}
+
+/**
  * 获取群公告
  * 需要权限: im:chat:readonly
  */
@@ -690,7 +716,7 @@ export async function getGroupAnnouncement(params: {
       content: response.data?.content,
     };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : String(err) };
+    return { error: extractFeishuError(err) };
   }
 }
 
