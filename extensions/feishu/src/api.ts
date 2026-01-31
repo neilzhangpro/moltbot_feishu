@@ -146,7 +146,7 @@ export async function probeFeishu(
     const client = getFeishuClient(account);
 
     // 尝试获取机器人信息来验证凭证
-    const response = await client.bot.v3.botInfo.get();
+    const response = await client.bot.botInfo.get();
 
     if ((response as { code?: number }).code !== 0) {
       return {
@@ -357,7 +357,7 @@ export async function getBotInfo(account: ResolvedFeishuAccount): Promise<{
 
   try {
     const client = getFeishuClient(account);
-    const response = (await client.bot.v3.botInfo.get()) as {
+    const response = (await client.bot.botInfo.get()) as {
       code?: number;
       msg?: string;
       data?: {
