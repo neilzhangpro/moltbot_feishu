@@ -162,7 +162,7 @@ export type FeishuCalendarEvent = {
 // ============ 命令系统类型 ============
 
 /** 支持的命令类型 */
-export type CommandType = "announcement" | "add_member" | "remove_member" | "list_members";
+export type CommandType = "announcement" | "clear_announcement" | "add_member" | "remove_member" | "list_members";
 
 /** 解析后的命令 */
 export type ParsedCommand = {

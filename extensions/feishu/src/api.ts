@@ -856,3 +856,68 @@ export async function updateGroupAnnouncement(params: {
     return { success: false, error: extractFeishuError(err) };
   }
 }
+
+/**
+ * 清空群公告（删除所有内容块）
+ * 使用 docx/v1/chats/{chat_id}/announcement/blocks API
+ * 需要权限: im:chat（机器人需要是群主或管理员）
+ */
+export async function clearGroupAnnouncement(params: {
+  account: ResolvedFeishuAccount;
+  chatId: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const { account, chatId } = params;
+  const client = getFeishuClient(account);
+
+  try {
+    // 先获取当前公告的所有 blocks
+    const getBlocksResponse = (await client.request({
+      method: "GET",
+      url: `/open-apis/docx/v1/chats/${chatId}/announcement/blocks?page_size=500&revision_id=-1`,
+    })) as {
+      code?: number;
+      msg?: string;
+      data?: {
+        items?: Array<{ block_id?: string; block_type?: number; parent_id?: string }>;
+      };
+    };
+
+    if (getBlocksResponse.code !== 0) {
+      return { success: false, error: getBlocksResponse.msg ?? `获取公告失败: ${getBlocksResponse.code}` };
+    }
+
+    const blocks = getBlocksResponse.data?.items ?? [];
+    // 查找根 block（page block，block_type: 1）
+    const pageBlock = blocks.find((b) => b.block_type === 1);
+    const rootBlockId = pageBlock?.block_id ?? chatId;
+
+    // 计算需要删除的子 block 数量（排除根 block 本身）
+    const childBlocks = blocks.filter((b) => b.parent_id === rootBlockId);
+
+    if (childBlocks.length === 0) {
+      return { success: true }; // 公告已经是空的
+    }
+
+    // 删除根 block 下的所有子 block
+    // DELETE /open-apis/docx/v1/chats/{chat_id}/announcement/blocks/{block_id}/children/batch_delete
+    const deleteResponse = (await client.request({
+      method: "DELETE",
+      url: `/open-apis/docx/v1/chats/${chatId}/announcement/blocks/${rootBlockId}/children/batch_delete?revision_id=-1`,
+      data: {
+        start_index: 0,
+        end_index: childBlocks.length,
+      },
+    })) as {
+      code?: number;
+      msg?: string;
+    };
+
+    if (deleteResponse.code !== 0) {
+      return { success: false, error: deleteResponse.msg ?? `删除公告失败: ${deleteResponse.code}` };
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: extractFeishuError(err) };
+  }
+}

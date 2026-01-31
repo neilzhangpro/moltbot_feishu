@@ -1,12 +1,13 @@
 /**
  * 飞书群管理命令处理器
- * 支持：/公告、/拉人、/踢人、/成员
+ * 支持：/公告、/清空公告、/拉人、/踢人、/成员
  */
 
 import type { ResolvedFeishuAccount, CommandType, ParsedCommand, CommandContext, CommandResult } from "./types.js";
 import {
   isUserGroupAdmin,
   updateGroupAnnouncement,
+  clearGroupAnnouncement,
   addMembersToGroup,
   removeMembersFromGroup,
   getGroupMembers,
@@ -17,13 +18,14 @@ import {
 /** 命令前缀映射 */
 const COMMAND_PREFIXES: Record<CommandType, string[]> = {
   announcement: ["/公告", "/announcement"],
+  clear_announcement: ["/清空公告", "/clear"],
   add_member: ["/拉人", "/add"],
   remove_member: ["/踢人", "/kick", "/remove"],
   list_members: ["/成员", "/members"],
 };
 
 /** 需要管理员权限的命令 */
-const ADMIN_REQUIRED_COMMANDS: CommandType[] = ["announcement", "add_member", "remove_member"];
+const ADMIN_REQUIRED_COMMANDS: CommandType[] = ["announcement", "clear_announcement", "add_member", "remove_member"];
 
 // ============ 命令解析 ============
 
@@ -107,6 +109,8 @@ export async function executeCommand(params: {
   switch (type) {
     case "announcement":
       return executeAnnouncementCommand(account, chatId, args);
+    case "clear_announcement":
+      return executeClearAnnouncementCommand(account, chatId);
     case "add_member":
       return executeAddMemberCommand(account, chatId, mentionedUserIds);
     case "remove_member":
@@ -136,6 +140,21 @@ async function executeAnnouncementCommand(
     return { success: true, message: "群公告已更新。" };
   }
   return { success: false, message: `更新公告失败：${result.error}` };
+}
+
+/**
+ * 执行清空公告命令
+ */
+async function executeClearAnnouncementCommand(
+  account: ResolvedFeishuAccount,
+  chatId: string,
+): Promise<CommandResult> {
+  const result = await clearGroupAnnouncement({ account, chatId });
+
+  if (result.success) {
+    return { success: true, message: "群公告已清空。" };
+  }
+  return { success: false, message: `清空公告失败：${result.error}` };
 }
 
 /**
