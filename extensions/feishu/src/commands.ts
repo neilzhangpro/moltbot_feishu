@@ -4,13 +4,7 @@
  */
 
 import type { ResolvedFeishuAccount, CommandType, ParsedCommand, CommandContext, CommandResult } from "./types.js";
-import {
-  isUserGroupAdmin,
-  updateGroupAnnouncement,
-  addMembersToGroup,
-  removeMembersFromGroup,
-  getGroupMembers,
-} from "./api.js";
+import { isUserGroupAdmin, addMembersToGroup, removeMembersFromGroup, getGroupMembers } from "./api.js";
 
 // ============ 命令定义 ============
 
@@ -120,22 +114,20 @@ export async function executeCommand(params: {
 
 /**
  * 执行公告命令
+ * 注意：飞书已将群公告升级为 block-based API，旧版 API 已弃用
+ * 当前功能暂不可用，待后续实现新版 API
  */
 async function executeAnnouncementCommand(
-  account: ResolvedFeishuAccount,
-  chatId: string,
-  content: string,
+  _account: ResolvedFeishuAccount,
+  _chatId: string,
+  _content: string,
 ): Promise<CommandResult> {
-  if (!content.trim()) {
-    return { success: false, message: "请提供公告内容。用法：/公告 <公告内容>" };
-  }
-
-  const result = await updateGroupAnnouncement({ account, chatId, content });
-
-  if (result.success) {
-    return { success: true, message: "群公告已更新。" };
-  }
-  return { success: false, message: `更新公告失败：${result.error}` };
+  // 飞书已升级群公告为 block-based 格式，旧版 API 不再可用
+  // 参考：https://open.feishu.cn/document/group/upgraded-group-announcement/group-announcement-faqs
+  return {
+    success: false,
+    message: "抱歉，群公告功能暂不可用。飞书已升级群公告格式，该功能待后续支持。",
+  };
 }
 
 /**
