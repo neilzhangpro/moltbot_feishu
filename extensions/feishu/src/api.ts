@@ -367,12 +367,8 @@ export async function getBotInfo(account: ResolvedFeishuAccount): Promise<{
     })) as {
       code?: number;
       msg?: string;
-      data?: {
-        bot?: {
-          open_id?: string;
-          app_name?: string;
-        };
-        // API 返回的字段可能直接在 data 下
+      // bot 字段直接在响应体根级别
+      bot?: {
         open_id?: string;
         app_name?: string;
       };
@@ -382,10 +378,9 @@ export async function getBotInfo(account: ResolvedFeishuAccount): Promise<{
       return { error: response.msg ?? `Feishu API error: ${response.code}` };
     }
 
-    // 兼容不同的返回结构
     const result = {
-      openId: response.data?.bot?.open_id ?? response.data?.open_id,
-      name: response.data?.bot?.app_name ?? response.data?.app_name,
+      openId: response.bot?.open_id,
+      name: response.bot?.app_name,
     };
 
     // 缓存结果
