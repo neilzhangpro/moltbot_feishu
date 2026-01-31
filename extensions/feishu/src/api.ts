@@ -668,9 +668,10 @@ export async function getGroupAnnouncement(params: {
 
   try {
     const client = getFeishuClient(account);
+    // 添加 user_id_type 参数
     const response = (await client.request({
       method: "GET",
-      url: `/open-apis/im/v1/chats/${chatId}/announcement`,
+      url: `/open-apis/im/v1/chats/${chatId}/announcement?user_id_type=open_id`,
     })) as {
       code?: number;
       msg?: string;
