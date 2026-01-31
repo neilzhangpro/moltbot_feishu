@@ -145,13 +145,16 @@ export async function probeFeishu(
   try {
     const client = getFeishuClient(account);
 
-    // 尝试获取机器人信息来验证凭证
-    const response = await client.bot.botInfo.get();
+    // 尝试获取机器人信息来验证凭证（使用 request 方式调用）
+    const response = (await client.request({
+      method: "GET",
+      url: "/open-apis/bot/v3/info",
+    })) as { code?: number; msg?: string };
 
-    if ((response as { code?: number }).code !== 0) {
+    if (response.code !== 0) {
       return {
         ok: false,
-        error: (response as { msg?: string }).msg ?? "Unknown error",
+        error: response.msg ?? "Unknown error",
       };
     }
 
@@ -357,7 +360,11 @@ export async function getBotInfo(account: ResolvedFeishuAccount): Promise<{
 
   try {
     const client = getFeishuClient(account);
-    const response = (await client.bot.botInfo.get()) as {
+    // 使用 request 方式调用机器人信息 API
+    const response = (await client.request({
+      method: "GET",
+      url: "/open-apis/bot/v3/info",
+    })) as {
       code?: number;
       msg?: string;
       data?: {
@@ -365,6 +372,9 @@ export async function getBotInfo(account: ResolvedFeishuAccount): Promise<{
           open_id?: string;
           app_name?: string;
         };
+        // API 返回的字段可能直接在 data 下
+        open_id?: string;
+        app_name?: string;
       };
     };
 
@@ -372,9 +382,10 @@ export async function getBotInfo(account: ResolvedFeishuAccount): Promise<{
       return { error: response.msg ?? `Feishu API error: ${response.code}` };
     }
 
+    // 兼容不同的返回结构
     const result = {
-      openId: response.data?.bot?.open_id,
-      name: response.data?.bot?.app_name,
+      openId: response.data?.bot?.open_id ?? response.data?.open_id,
+      name: response.data?.bot?.app_name ?? response.data?.app_name,
     };
 
     // 缓存结果
