@@ -657,8 +657,46 @@ export async function removeMembersFromGroup(params: {
 }
 
 /**
+ * 获取群公告
+ * 需要权限: im:chat:readonly
+ */
+export async function getGroupAnnouncement(params: {
+  account: ResolvedFeishuAccount;
+  chatId: string;
+}): Promise<{ revision?: string; content?: string; error?: string }> {
+  const { account, chatId } = params;
+
+  try {
+    const client = getFeishuClient(account);
+    const response = (await client.request({
+      method: "GET",
+      url: `/open-apis/im/v1/chats/${chatId}/announcement`,
+    })) as {
+      code?: number;
+      msg?: string;
+      data?: {
+        revision?: string;
+        content?: string;
+      };
+    };
+
+    if (response.code !== 0) {
+      return { error: response.msg ?? `Feishu API error: ${response.code}` };
+    }
+
+    return {
+      revision: response.data?.revision,
+      content: response.data?.content,
+    };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * 更新群公告
  * 需要权限: im:chat（机器人需要是群主或管理员）
+ * 注意: 飞书要求更新公告时必须携带 revision 参数（乐观锁）
  */
 export async function updateGroupAnnouncement(params: {
   account: ResolvedFeishuAccount;
@@ -673,11 +711,21 @@ export async function updateGroupAnnouncement(params: {
 
   try {
     const client = getFeishuClient(account);
-    // 使用 request 方式调用更新群公告 API
+
+    // 先获取当前公告的 revision（飞书要求更新时必须携带 revision）
+    const currentAnnouncement = await getGroupAnnouncement({ account, chatId });
+    if (currentAnnouncement.error) {
+      return { success: false, error: `获取当前公告失败：${currentAnnouncement.error}` };
+    }
+
+    // 更新群公告，携带 revision
     const response = (await client.request({
       method: "PATCH",
       url: `/open-apis/im/v1/chats/${chatId}/announcement`,
-      data: { content },
+      data: {
+        revision: currentAnnouncement.revision ?? "0",
+        content,
+      },
     })) as {
       code?: number;
       msg?: string;
