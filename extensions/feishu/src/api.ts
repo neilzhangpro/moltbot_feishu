@@ -683,18 +683,17 @@ function extractFeishuError(err: unknown): string {
 }
 
 /**
- * 获取群公告
+ * 获取群公告（旧版 API，仅适用于未升级的群组）
  * 需要权限: im:chat:readonly
  */
 export async function getGroupAnnouncement(params: {
   account: ResolvedFeishuAccount;
   chatId: string;
-}): Promise<{ revision?: string; content?: string; error?: string }> {
+}): Promise<{ revision?: string; content?: string; isDocxType?: boolean; error?: string }> {
   const { account, chatId } = params;
 
   try {
     const client = getFeishuClient(account);
-    // 添加 user_id_type 参数
     const response = (await client.request({
       method: "GET",
       url: `/open-apis/im/v1/chats/${chatId}/announcement?user_id_type=open_id`,
@@ -716,14 +715,120 @@ export async function getGroupAnnouncement(params: {
       content: response.data?.content,
     };
   } catch (err) {
-    return { error: extractFeishuError(err) };
+    const errorMsg = extractFeishuError(err);
+    // 检测是否为 docx 类型群公告（升级版）
+    if (errorMsg.includes("docx type") || errorMsg.includes("232097")) {
+      return { isDocxType: true, error: errorMsg };
+    }
+    return { error: errorMsg };
   }
 }
 
 /**
- * 更新群公告
+ * 更新升级版群公告（docx 类型）
+ * 使用新版 block-based API
  * 需要权限: im:chat（机器人需要是群主或管理员）
- * 注意: 飞书要求更新公告时必须携带 revision 参数（乐观锁）
+ */
+async function updateDocxAnnouncement(params: {
+  account: ResolvedFeishuAccount;
+  chatId: string;
+  content: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const { account, chatId, content } = params;
+  const client = getFeishuClient(account);
+
+  try {
+    // 升级版群公告使用 block-based API
+    // 先获取当前公告的 blocks 以获取根 block_id
+    const getBlocksResponse = (await client.request({
+      method: "GET",
+      url: `/open-apis/im/v2/chats/${chatId}/chat_announcement/blocks?page_size=50`,
+    })) as {
+      code?: number;
+      msg?: string;
+      data?: {
+        items?: Array<{ block_id?: string; block_type?: number; parent_id?: string }>;
+      };
+    };
+
+    if (getBlocksResponse.code !== 0) {
+      return { success: false, error: getBlocksResponse.msg ?? `获取公告失败: ${getBlocksResponse.code}` };
+    }
+
+    // 构建段落 block 数据结构
+    const paragraphBlock = {
+      block_type: 2, // 2 = paragraph
+      paragraph: {
+        elements: [
+          {
+            text_run: {
+              content: content,
+            },
+          },
+        ],
+      },
+    };
+
+    // 如果已有 blocks，使用批量更新；否则创建新 block
+    const existingBlocks = getBlocksResponse.data?.items ?? [];
+
+    if (existingBlocks.length > 0) {
+      // 批量更新现有 blocks
+      const updateResponse = (await client.request({
+        method: "PATCH",
+        url: `/open-apis/im/v2/chats/${chatId}/chat_announcement/blocks/batch_update`,
+        data: {
+          update_blocks: [
+            {
+              block_id: existingBlocks[0].block_id,
+              update_paragraph: {
+                elements: [
+                  {
+                    text_run: {
+                      content: content,
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      })) as {
+        code?: number;
+        msg?: string;
+      };
+
+      if (updateResponse.code !== 0) {
+        return { success: false, error: updateResponse.msg ?? `更新公告失败: ${updateResponse.code}` };
+      }
+    } else {
+      // 创建新的 block
+      const createResponse = (await client.request({
+        method: "POST",
+        url: `/open-apis/im/v2/chats/${chatId}/chat_announcement/blocks`,
+        data: {
+          children: [paragraphBlock],
+        },
+      })) as {
+        code?: number;
+        msg?: string;
+      };
+
+      if (createResponse.code !== 0) {
+        return { success: false, error: createResponse.msg ?? `创建公告失败: ${createResponse.code}` };
+      }
+    }
+
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: extractFeishuError(err) };
+  }
+}
+
+/**
+ * 更新群公告（自动检测版本）
+ * 需要权限: im:chat（机器人需要是群主或管理员）
+ * 自动检测群组是否使用升级版(docx)群公告，并使用对应的 API
  */
 export async function updateGroupAnnouncement(params: {
   account: ResolvedFeishuAccount;
@@ -736,16 +841,22 @@ export async function updateGroupAnnouncement(params: {
     return { success: false, error: "公告内容不能为空" };
   }
 
+  // 先尝试获取旧版公告，检测是否为 docx 类型
+  const currentAnnouncement = await getGroupAnnouncement({ account, chatId });
+
+  // 如果是 docx 类型（升级版群公告），使用新版 API
+  if (currentAnnouncement.isDocxType) {
+    return updateDocxAnnouncement({ account, chatId, content });
+  }
+
+  // 如果获取旧版公告失败（非 docx 类型错误），返回错误
+  if (currentAnnouncement.error && !currentAnnouncement.isDocxType) {
+    return { success: false, error: `获取当前公告失败：${currentAnnouncement.error}` };
+  }
+
+  // 使用旧版 API 更新
   try {
     const client = getFeishuClient(account);
-
-    // 先获取当前公告的 revision（飞书要求更新时必须携带 revision）
-    const currentAnnouncement = await getGroupAnnouncement({ account, chatId });
-    if (currentAnnouncement.error) {
-      return { success: false, error: `获取当前公告失败：${currentAnnouncement.error}` };
-    }
-
-    // 更新群公告，携带 revision
     const response = (await client.request({
       method: "PATCH",
       url: `/open-apis/im/v1/chats/${chatId}/announcement`,
@@ -764,6 +875,6 @@ export async function updateGroupAnnouncement(params: {
 
     return { success: true };
   } catch (err) {
-    return { success: false, error: err instanceof Error ? err.message : String(err) };
+    return { success: false, error: extractFeishuError(err) };
   }
 }
