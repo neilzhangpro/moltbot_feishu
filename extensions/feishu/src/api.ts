@@ -726,7 +726,7 @@ export async function getGroupAnnouncement(params: {
 
 /**
  * 更新升级版群公告（docx 类型）
- * 使用 docx/v1/chat_announcement_blocks API
+ * 使用 docx/v1/chats/{chat_id}/announcement API
  * 参考文档：https://open.feishu.cn/document/group/upgraded-group-announcement/chat-announcement-block/create
  * 需要权限: im:chat（机器人需要是群主或管理员）
  */
@@ -739,12 +739,11 @@ async function updateDocxAnnouncement(params: {
   const client = getFeishuClient(account);
 
   try {
-    // 升级版群公告使用 docx/v1/chat_announcement_blocks API
+    // 升级版群公告使用 docx/v1/chats/{chat_id}/announcement/blocks API
     // 先获取当前公告的 blocks 以获取根 block_id
-    // 参考 SDK: client.docx.v1.chatAnnouncementBlock.list
     const getBlocksResponse = (await client.request({
       method: "GET",
-      url: `/open-apis/docx/v1/chat_announcement_blocks/${chatId}?page_size=50&revision_id=-1`,
+      url: `/open-apis/docx/v1/chats/${chatId}/announcement/blocks?page_size=50&revision_id=-1`,
     })) as {
       code?: number;
       msg?: string;
@@ -781,10 +780,10 @@ async function updateDocxAnnouncement(params: {
     const blockId = pageBlock?.block_id ?? chatId;
 
     // 在 block 下创建子 block
-    // 参考 SDK: client.docx.v1.chatAnnouncementBlockChildren.create
+    // POST /open-apis/docx/v1/chats/{chat_id}/announcement/blocks/{block_id}/children
     const createResponse = (await client.request({
       method: "POST",
-      url: `/open-apis/docx/v1/chat_announcement_blocks/${chatId}/blocks/${blockId}/children?revision_id=-1`,
+      url: `/open-apis/docx/v1/chats/${chatId}/announcement/blocks/${blockId}/children?revision_id=-1`,
       data: {
         children: [paragraphBlock],
         index: 0, // 插入到开头
